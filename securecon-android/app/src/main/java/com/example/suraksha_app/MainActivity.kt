@@ -4,91 +4,89 @@ import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageProxy
+import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.security.crypto.EncryptedFile
+import androidx.security.crypto.MasterKey
 import java.io.File
-import java.io.FileOutputStream
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     private var imageCapture: ImageCapture? = null
-    private val cryptoManager = CryptoManager() // Using the base code we wrote earlier
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 1. SECURITY: Disable Screenshots and Screen Recording
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE
-        )
-
+        // Disable screenshots/recordings
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_main)
 
-        // 2. UI: Find the ViewFinder and Button from your XML Layout
         val viewFinder = findViewById<PreviewView>(R.id.viewFinder)
         val captureButton = findViewById<Button>(R.id.capture_button)
 
-        // 3. START: Initialize the Camera
         startCamera(viewFinder)
-
-        // 4. ACTION: When button is clicked, take a secure photo
         captureButton.setOnClickListener { takeSecurePhoto() }
     }
 
-    private fun startCamera(viewFinder: PreviewView) {
+    private fun startCamera(previewView: PreviewView) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
-            
-            // Set up the preview stream
-            val preview = androidx.camera.core.Preview.Builder().build().also {
-                it.setSurfaceProvider(viewFinder.surfaceProvider)
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
             }
-
             imageCapture = ImageCapture.Builder().build()
-
-            // Select back camera as default
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture)
-            } catch (exc: Exception) {
-                Toast.makeText(this, "Camera failed to start", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Camera Error", Toast.LENGTH_SHORT).show()
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun takeSecurePhoto() {
         val imageCapture = imageCapture ?: return
-
+        
         imageCapture.takePicture(
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
-                    // Convert camera image to bytes
-                    val buffer = image.planes[0].buffer
-                    val bytes = ByteArray(buffer.remaining())
-                    buffer.get(bytes)
-                    
-                    // Create a .sec file in the app's private storage
-                    val file = File(filesDir, "SEC_${System.currentTimeMillis()}.sec")
-                    val outputStream = FileOutputStream(file)
-                    
-                    // ENCRYPT the bytes before saving
-                    cryptoManager.encrypt(bytes, outputStream)
-                    
-                    outputStream.close()
+                    saveEncrypted(image)
                     image.close()
-
-                    Toast.makeText(baseContext, "Encrypted: ${file.name}", Toast.LENGTH_SHORT).show()
+                }
+                override fun onError(exception: ImageCaptureException) {
+                    Toast.makeText(baseContext, "Capture Failed", Toast.LENGTH_SHORT).show()
                 }
             }
         )
+    }
+
+    private fun saveEncrypted(image: ImageProxy) {
+        val buffer = image.planes[0].buffer
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+
+        val fileName = "SURAKSHA_${System.currentTimeMillis()}.sec"
+        val file = File(filesDir, fileName)
+
+        val masterKey = MasterKey.Builder(this)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+
+        val encryptedFile = EncryptedFile.Builder(
+            this, file, masterKey,
+            EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB
+        ).build()
+
+        encryptedFile.openFileOutput().use { output ->
+            output.write(bytes)
+        }
+        
+        Toast.makeText(this, "Saved Securely: $fileName", Toast.LENGTH_LONG).show()
     }
 }
