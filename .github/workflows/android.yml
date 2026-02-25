@@ -1,0 +1,26 @@
+name: Build Suraksha APK
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x securecon-android/gradlew
+
+      - name: Build with Gradle
+        run: cd securecon-android && ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Suraksha-Phase1-Alpha
+          path: securecon-android/app/build/outputs/apk/debug/app-debug.apk
