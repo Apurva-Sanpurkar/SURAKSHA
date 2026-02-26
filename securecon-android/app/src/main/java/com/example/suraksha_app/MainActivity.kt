@@ -2,7 +2,9 @@ package com.example.suraksha_app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.Toast
@@ -107,10 +109,16 @@ class MainActivity : AppCompatActivity() {
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
 
-            // VISIBLE PATH: Uses External Scoped Storage
-            val folder = getExternalFilesDir(null) 
+            // NEW PUBLIC PATH: Downloads/Suraksha
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val surakshaFolder = File(downloadsDir, "Suraksha")
+            
+            if (!surakshaFolder.exists()) {
+                surakshaFolder.mkdirs()
+            }
+
             val fileName = "SURAKSHA_${System.currentTimeMillis()}.sec"
-            val file = File(folder, fileName)
+            val file = File(surakshaFolder, fileName)
 
             // Hardware-backed AES-256 Key
             val masterKey = MasterKey.Builder(this)
@@ -127,12 +135,12 @@ class MainActivity : AppCompatActivity() {
             }
 
             runOnUiThread {
-                Toast.makeText(this, "SUCCESS: Saved to Android/data/.../files", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "SUCCESS: File at Downloads/Suraksha", Toast.LENGTH_LONG).show()
             }
 
         } catch (e: Exception) {
             runOnUiThread {
-                Toast.makeText(this, "Encryption Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Save Error: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -160,9 +168,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ONLY ONE COMPANION OBJECT ALLOWED
     companion object {
         private const val REQUEST_CODE_PERMISSIONS = 10
-        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
+        
+        // Added Storage permissions for older Android versions
+        private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.CAMERA)
+        } else {
+            arrayOf(
+                Manifest.permission.CAMERA,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            )
+        }
     }
 }
