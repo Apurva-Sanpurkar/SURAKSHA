@@ -26,17 +26,18 @@ android {
 }
 
 dependencies {
+    // Core Android (Non-Compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.constraintlayout)
     
-    // CameraX Implementation
+    // CameraX
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     
-    // Crypto Implementation
+    // Security
     implementation(libs.androidx.security.crypto)
 }
