@@ -9,6 +9,7 @@ import android.os.Environment
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -29,19 +30,27 @@ class MainActivity : AppCompatActivity() {
 
     private var imageCapture: ImageCapture? = null
     private lateinit var cameraExecutor: ExecutorService
+    
+    // UI Elements
     private lateinit var dashboard: LinearLayout
+    private lateinit var cameraContainer: View
     private lateinit var viewFinder: PreviewView
     private lateinit var captureBtn: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Security: Prevent screenshots
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_main)
 
+        // Initialize UI Components
         dashboard = findViewById(R.id.dashboard_ui)
+        cameraContainer = findViewById(R.id.camera_container)
         viewFinder = findViewById(R.id.viewFinder)
         captureBtn = findViewById(R.id.capture_button)
 
+        // Dashboard Navigation
         findViewById<Button>(R.id.btn_goto_camera).setOnClickListener {
             switchToCamera()
         }
@@ -51,14 +60,22 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
-        captureBtn.setOnClickListener { takeSecurePhoto() }
+        // Camera Navigation & Action
+        findViewById<ImageButton>(R.id.btn_back_to_dash).setOnClickListener {
+            closeCamera()
+        }
+
+        captureBtn.setOnClickListener { 
+            takeSecurePhoto() 
+        }
+
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
     private fun switchToCamera() {
+        // UI toggle must happen BEFORE camera start to avoid black screen
         dashboard.visibility = View.GONE
-        viewFinder.visibility = View.VISIBLE
-        captureBtn.visibility = View.VISIBLE
+        cameraContainer.visibility = View.VISIBLE
         
         if (allPermissionsGranted()) {
             startCamera()
@@ -67,25 +84,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startCamera() {
+    private fun closeCamera() {
+        // Release camera hardware
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(viewFinder.surfaceProvider)
-            }
-            imageCapture = ImageCapture.Builder().build()
+            cameraProvider.unbindAll()
+            
+            cameraContainer.visibility = View.GONE
+            dashboard.visibility = View.VISIBLE
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+        cameraProviderFuture.addListener({
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder()
+                .build()
+                .also {
+                    it.setSurfaceProvider(viewFinder.surfaceProvider)
+                }
+
+            imageCapture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .build()
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
             try {
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture)
             } catch (exc: Exception) {
-                Toast.makeText(this, "Camera failed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Camera bind failed", Toast.LENGTH_SHORT).show()
             }
+
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun takeSecurePhoto() {
         val imageCapture = imageCapture ?: return
+
         imageCapture.takePicture(
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageCapturedCallback() {
@@ -93,8 +134,9 @@ class MainActivity : AppCompatActivity() {
                     saveEncrypted(image)
                     image.close()
                 }
-                override fun onError(exc: ImageCaptureException) {
-                    Toast.makeText(baseContext, "Capture error", Toast.LENGTH_SHORT).show()
+
+                override fun onError(exception: ImageCaptureException) {
+                    Toast.makeText(baseContext, "Capture failed", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -106,31 +148,42 @@ class MainActivity : AppCompatActivity() {
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
 
+            // Human readable filename with timestamp
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "SEC_$timeStamp.sec"
             
+            // Save to public Downloads/Suraksha folder
             val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Suraksha")
             if (!folder.exists()) folder.mkdirs()
             val file = File(folder, fileName)
 
             val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-            val encryptedFile = EncryptedFile.Builder(this, file, masterKey, EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB).build()
+            val encryptedFile = EncryptedFile.Builder(
+                this, file, masterKey,
+                EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB
+            ).build()
 
             encryptedFile.openFileOutput().use { it.write(bytes) }
 
             runOnUiThread {
                 Toast.makeText(this, "Encrypted: $fileName", Toast.LENGTH_SHORT).show()
-                dashboard.visibility = View.VISIBLE
-                viewFinder.visibility = View.GONE
-                captureBtn.visibility = View.GONE
+                closeCamera() // Automatically return to dash after capture
             }
+
         } catch (e: Exception) {
-            runOnUiThread { Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show() }
+            runOnUiThread {
+                Toast.makeText(this, "Encryption Error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
     }
 
     companion object {

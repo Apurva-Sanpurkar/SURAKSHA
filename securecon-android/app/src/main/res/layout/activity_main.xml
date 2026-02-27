@@ -3,11 +3,36 @@
     android:layout_height="match_parent"
     android:background="#0F0F0F">
 
-    <androidx.camera.view.PreviewView
-        android:id="@+id/viewFinder"
+    <RelativeLayout
+        android:id="@+id/camera_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone" />
+        android:visibility="gone">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/viewFinder"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <ImageButton
+            android:id="@+id/btn_back_to_dash"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_margin="20dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_revert"
+            android:contentDescription="Back" />
+
+        <Button
+            android:id="@+id/capture_button"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:text="📸"
+            android:layout_alignParentBottom="true"
+            android:layout_centerHorizontal="true"
+            android:layout_marginBottom="40dp"
+            android:backgroundTint="#D32F2F"/>
+    </RelativeLayout>
 
     <LinearLayout
         android:id="@+id/dashboard_ui"
@@ -31,8 +56,6 @@
             android:layout_width="280dp"
             android:layout_height="70dp"
             android:text="Secure Capture"
-            android:textSize="18sp"
-            android:layout_marginBottom="20dp"
             android:backgroundTint="#1B5E20"/>
 
         <Button
@@ -40,19 +63,7 @@
             android:layout_width="280dp"
             android:layout_height="70dp"
             android:text="View Vault"
-            android:textSize="18sp"
+            android:layout_marginTop="20dp"
             android:backgroundTint="#37474F"/>
     </LinearLayout>
-
-    <Button
-        android:id="@+id/capture_button"
-        android:layout_width="80dp"
-        android:layout_height="80dp"
-        android:text="📸"
-        android:visibility="gone"
-        android:layout_alignParentBottom="true"
-        android:layout_centerHorizontal="true"
-        android:layout_marginBottom="40dp"
-        android:backgroundTint="#D32F2F"/>
-
 </RelativeLayout>
