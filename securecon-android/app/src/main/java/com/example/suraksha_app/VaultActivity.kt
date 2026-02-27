@@ -9,6 +9,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
@@ -20,19 +21,20 @@ import java.io.FileOutputStream
 class VaultActivity : AppCompatActivity() {
 
     private lateinit var imageView: ImageView
-    private lateinit var shareBtn: Button
+    private lateinit var shareContainer: LinearLayout
     private var currentBitmap: Bitmap? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Keep screen secure even in the viewer
+        // Keep screen secure even in viewer
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_vault)
 
         imageView = findViewById(R.id.decryptedImageView)
-        shareBtn = findViewById(R.id.btn_share)
+        shareContainer = findViewById(R.id.share_container)
 
         findViewById<Button>(R.id.btn_select_file).setOnClickListener {
+            // Using a simple GET_CONTENT intent
             val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
                 type = "*/*"
                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -40,25 +42,31 @@ class VaultActivity : AppCompatActivity() {
             startActivityForResult(intent, 100)
         }
 
-        shareBtn.setOnClickListener {
-            shareImage()
+        findViewById<Button>(R.id.btn_share).setOnClickListener {
+            shareSecurely()
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 100 && resultCode == RESULT_OK) {
-            data?.data?.let { uri -> decryptAndDisplay(uri) }
+            data?.data?.let { uri -> processUri(uri) }
         }
     }
 
-    private fun decryptAndDisplay(uri: Uri) {
+    private fun processUri(uri: Uri) {
         try {
-            // Locate the file in the Suraksha folder
+            // Locate file in Downloads/Suraksha
             val fileName = uri.path?.split("/")?.last()?.replace("primary:", "") ?: return
             val file = File(android.os.Environment.getExternalStoragePublicDirectory(
                 android.os.Environment.DIRECTORY_DOWNLOADS), "Suraksha/$fileName")
 
+            if (!file.exists()) {
+                Toast.makeText(this, "File not found at: ${file.absolutePath}", Toast.LENGTH_LONG).show()
+                return
+            }
+
+            // Decrypt
             val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
             val encryptedFile = EncryptedFile.Builder(this, file, masterKey, 
                 EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB).build()
@@ -66,36 +74,38 @@ class VaultActivity : AppCompatActivity() {
             encryptedFile.openFileInput().use { input ->
                 val bytes = input.readBytes()
                 currentBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                
+                // Show Preview and Share Button
                 imageView.setImageBitmap(currentBitmap)
-                shareBtn.visibility = View.VISIBLE
-                Toast.makeText(this, "Decryption Successful", Toast.LENGTH_SHORT).show()
+                shareContainer.visibility = View.VISIBLE
+                Toast.makeText(this, "Unlocking Secure Media...", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Decryption Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
-    private fun shareImage() {
+    private fun shareSecurely() {
         val bitmap = currentBitmap ?: return
         try {
-            // Create a temporary file for sharing
-            val cachePath = File(cacheDir, "shared_images")
+            // Temporary cache file for sharing
+            val cachePath = File(cacheDir, "images")
             cachePath.mkdirs()
-            val stream = FileOutputStream("$cachePath/temp_share.png")
+            val file = File(cachePath, "temp_decrypted.png")
+            val stream = FileOutputStream(file)
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
             stream.close()
 
-            val newFile = File(cachePath, "temp_share.png")
-            val contentUri = FileProvider.getUriForFile(this, "${packageName}.provider", newFile)
+            val contentUri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
 
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "image/png"
                 putExtra(Intent.EXTRA_STREAM, contentUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(shareIntent, "Send Image via..."))
+            startActivity(Intent.createChooser(shareIntent, "Secure Share via..."))
         } catch (e: Exception) {
-            Toast.makeText(this, "Sharing failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 }
