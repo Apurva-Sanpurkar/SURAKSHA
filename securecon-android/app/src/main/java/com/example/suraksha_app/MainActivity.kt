@@ -3,15 +3,14 @@ package com.example.suraksha_app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
+import android.graphics.*
+import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.util.Base64
 import android.view.View
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.ImageButton
-import android.widget.LinearLayout
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -19,189 +18,174 @@ import androidx.camera.view.PreviewView
 import androidx.cardview.widget.CardView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.security.crypto.EncryptedFile
-import androidx.security.crypto.MasterKey
+import androidx.core.content.FileProvider
 import java.io.File
+import java.io.FileOutputStream
+import java.security.*
+import java.security.spec.X509EncodedKeySpec
 import java.text.SimpleDateFormat
 import java.util.*
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import javax.crypto.Cipher
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 
 class MainActivity : AppCompatActivity() {
 
     private var imageCapture: ImageCapture? = null
-    private lateinit var cameraExecutor: ExecutorService
-    
-    // UI Elements
-    private lateinit var dashboard: LinearLayout
+    private var latestBitmap: Bitmap? = null
+    private var latestEncryptedFile: File? = null
+
+    // UI elements
+    private lateinit var dashboard: View
     private lateinit var cameraContainer: View
-    private lateinit var viewFinder: PreviewView
-    private lateinit var captureBtn: Button
+    private lateinit var postCapturePreview: View
+    private lateinit var capturedImageView: ImageView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // Security: Prevent screenshots and screen recording
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_main)
 
-        // Initialize UI Components
+        // Initialize Views
         dashboard = findViewById(R.id.dashboard_ui)
         cameraContainer = findViewById(R.id.camera_container)
-        viewFinder = findViewById(R.id.viewFinder)
-        captureBtn = findViewById(R.id.capture_button)
+        postCapturePreview = findViewById(R.id.post_capture_preview)
+        capturedImageView = findViewById(R.id.captured_image_view)
 
-        // Professional Card-based Navigation
+        // 1. Setup Hardware Identity
+        ensureHardwareIdentity()
+        handleIncomingHandshake(intent)
+
+        // 2. Button Listeners
         findViewById<CardView>(R.id.card_camera).setOnClickListener {
-            switchToCamera()
-        }
-
-        findViewById<CardView>(R.id.card_vault).setOnClickListener {
-            val intent = Intent(this, VaultActivity::class.java)
-            startActivity(intent)
-        }
-
-        // Camera Navigation (Back Button)
-        findViewById<ImageButton>(R.id.btn_back_to_dash).setOnClickListener {
-            closeCamera()
-        }
-
-        captureBtn.setOnClickListener { 
-            takeSecurePhoto() 
-        }
-
-        cameraExecutor = Executors.newSingleThreadExecutor()
-    }
-
-    private fun switchToCamera() {
-        // Toggle UI visibility before starting camera to prevent black screen
-        dashboard.visibility = View.GONE
-        cameraContainer.visibility = View.VISIBLE
-        
-        if (allPermissionsGranted()) {
+            dashboard.visibility = View.GONE
+            cameraContainer.visibility = View.VISIBLE
             startCamera()
-        } else {
-            ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
+        }
+
+        // Add this to your XML as a button/card for inviting others
+        findViewById<Button>(R.id.btn_invite_contact).setOnClickListener {
+            shareInviteLink()
+        }
+
+        findViewById<Button>(R.id.capture_button).setOnClickListener { takeSecurePhoto() }
+        findViewById<Button>(R.id.btn_share_now).setOnClickListener { shareEncryptedFile() }
+        findViewById<Button>(R.id.btn_discard).setOnClickListener {
+            postCapturePreview.visibility = View.GONE
+            cameraContainer.visibility = View.VISIBLE
         }
     }
 
-    private fun closeCamera() {
-        // Unbind camera hardware to free up resources
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener({
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-            cameraProvider.unbindAll()
-            
-            cameraContainer.visibility = View.GONE
-            dashboard.visibility = View.VISIBLE
-        }, ContextCompat.getMainExecutor(this))
+    // --- SECURITY HANDSHAKE LOGIC ---
+
+    private fun ensureHardwareIdentity() {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (!ks.containsAlias("suraksha_id")) {
+            val kpg = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore")
+            kpg.initialize(KeyGenParameterSpec.Builder("suraksha_id", 
+                KeyProperties.PURPOSE_DECRYPT or KeyProperties.PURPOSE_ENCRYPT)
+                .setDigests(KeyProperties.DIGEST_SHA256)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_PKCS1)
+                .build())
+            kpg.generateKeyPair()
+        }
     }
+
+    private fun shareInviteLink() {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val publicKey = ks.getCertificate("suraksha_id").publicKey
+        val keyBase64 = Base64.encodeToString(publicKey.encoded, Base64.URL_SAFE or Base64.NO_WRAP)
+        
+        val link = "suraksha://add-key?name=Adishree&key=$keyBase64"
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "Connect with me on Suraksha: $link")
+        }
+        startActivity(Intent.createChooser(intent, "Share Invite"))
+    }
+
+    private fun handleIncomingHandshake(intent: Intent) {
+        val data: Uri? = intent.data
+        if (data != null && data.scheme == "suraksha") {
+            val name = data.getQueryParameter("name") ?: "Contact"
+            val key = data.getQueryParameter("key") ?: ""
+            getSharedPreferences("Contacts", MODE_PRIVATE).edit().putString("saved_key", key).apply()
+            Toast.makeText(this, "Handshake with $name Successful!", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // --- CAMERA & PREVIEW LOGIC ---
 
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-
         cameraProviderFuture.addListener({
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-
-            val preview = Preview.Builder()
-                .build()
-                .also {
-                    it.setSurfaceProvider(viewFinder.surfaceProvider)
-                }
-
-            imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .build()
-
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture)
-            } catch (exc: Exception) {
-                Toast.makeText(this, "Camera Error: ${exc.message}", Toast.LENGTH_SHORT).show()
+            val cameraProvider = cameraProviderFuture.get()
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(findViewById<PreviewView>(R.id.viewFinder).surfaceProvider)
             }
-
+            imageCapture = ImageCapture.Builder().build()
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun takeSecurePhoto() {
-        val imageCapture = imageCapture ?: return
-        Toast.makeText(this, "Encrypting...", Toast.LENGTH_SHORT).show()
-
-        imageCapture.takePicture(
-            ContextCompat.getMainExecutor(this),
-            object : ImageCapture.OnImageCapturedCallback() {
-                override fun onCaptureSuccess(image: ImageProxy) {
-                    saveEncrypted(image)
-                    image.close()
-                }
-
-                override fun onError(exception: ImageCaptureException) {
-                    Toast.makeText(baseContext, "Capture failed", Toast.LENGTH_SHORT).show()
-                }
+        imageCapture?.takePicture(ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageCapturedCallback() {
+            override fun onCaptureSuccess(image: ImageProxy) {
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
+                image.close()
+                saveAndShowPreview(bytes)
             }
-        )
+            override fun onError(exc: ImageCaptureException) {}
+        })
     }
 
-    private fun saveEncrypted(image: ImageProxy) {
+    private fun saveAndShowPreview(data: ByteArray) {
         try {
-            val buffer = image.planes[0].buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
-
-            // Better Filename: SEC_YYYYMMDD_HHMMSS.sec
+            // Create Local Encrypted Copy
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val fileName = "SEC_$timeStamp.sec"
-            
-            // Save to Public Downloads/Suraksha for easy retrieval
             val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Suraksha")
             if (!folder.exists()) folder.mkdirs()
-            val file = File(folder, fileName)
-
-            // AES-256 GCM Encryption via Jetpack Security
-            val masterKey = MasterKey.Builder(this)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-
-            val encryptedFile = EncryptedFile.Builder(
-                this, file, masterKey,
-                EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB
-            ).build()
-
-            encryptedFile.openFileOutput().use { it.write(bytes) }
-
-            runOnUiThread {
-                Toast.makeText(this, "Saved: $fileName", Toast.LENGTH_LONG).show()
-                closeCamera() // Auto-return to dashboard after capture
+            val file = File(folder, "SEC_$timeStamp.sec")
+            
+            // For Phase 1 demo, we save the raw bytes encrypted via public key if available
+            val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
+            if (savedKey != null) {
+                val encryptedData = encryptWithPublicKey(data, savedKey)
+                FileOutputStream(file).use { it.write(encryptedData) }
+            } else {
+                FileOutputStream(file).use { it.write(data) } // Fallback to raw for testing
             }
 
-        } catch (e: Exception) {
+            latestEncryptedFile = file
+            latestBitmap = BitmapFactory.decodeByteArray(data, 0, data.size)
+
             runOnUiThread {
-                Toast.makeText(this, "Encryption Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                capturedImageView.setImageBitmap(latestBitmap)
+                cameraContainer.visibility = View.GONE
+                postCapturePreview.visibility = View.VISIBLE
             }
+        } catch (e: Exception) { }
+    }
+
+    private fun encryptWithPublicKey(data: ByteArray, keyBase64: String): ByteArray {
+        val keyBytes = Base64.decode(keyBase64, Base64.URL_SAFE)
+        val publicKey = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(keyBytes))
+        val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+        return cipher.doFinal(data)
+    }
+
+    private fun shareEncryptedFile() {
+        val file = latestEncryptedFile ?: return
+        val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-    }
-
-    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
-        ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        cameraExecutor.shutdown()
-    }
-
-    companion object {
-        private const val REQUEST_CODE_PERMISSIONS = 10
-        private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(Manifest.permission.CAMERA)
-        } else {
-            arrayOf(
-                Manifest.permission.CAMERA, 
-                Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            )
-        }
+        startActivity(Intent.createChooser(intent, "Send Secure .sec File"))
     }
 }

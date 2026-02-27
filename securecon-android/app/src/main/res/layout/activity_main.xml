@@ -2,7 +2,9 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F8F9FA"> <RelativeLayout
+    android:background="#F8F9FA">
+
+    <RelativeLayout
         android:id="@+id/camera_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -21,15 +23,51 @@
             app:tint="#1A73E8" />
         <Button
             android:id="@+id/capture_button"
-            android:layout_width="75dp"
-            android:layout_height="75dp"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
             android:layout_alignParentBottom="true"
             android:layout_centerHorizontal="true"
             android:layout_marginBottom="40dp"
-            android:text="PHOTO"
+            android:text="SHOT"
             android:backgroundTint="#1A73E8"
             android:textColor="#FFFFFF" />
     </RelativeLayout>
+
+    <LinearLayout
+        android:id="@+id/post_capture_preview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="#FFFFFF"
+        android:visibility="gone"
+        android:padding="20dp"
+        android:gravity="center">
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="450dp"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="8dp">
+            <ImageView
+                android:id="@+id/captured_image_view"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop" />
+        </androidx.cardview.widget.CardView>
+        <Button
+            android:id="@+id/btn_share_now"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:layout_marginTop="20dp"
+            android:text="Share to WhatsApp/Telegram"
+            android:backgroundTint="#34A853" />
+        <Button
+            android:id="@+id/btn_discard"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:layout_marginTop="10dp"
+            android:text="Back to Camera"
+            android:backgroundTint="#5F6368" />
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/dashboard_ui"
@@ -38,40 +76,27 @@
         android:orientation="vertical"
         android:padding="24dp"
         android:gravity="center_horizontal">
-
         <ImageView
             android:layout_width="80dp"
             android:layout_height="80dp"
             android:layout_marginTop="60dp"
             android:src="@android:drawable/ic_lock_power_off"
             app:tint="#1A73E8" />
-
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="SURAKSHA"
             android:textColor="#202124"
             android:textSize="32sp"
-            android:letterSpacing="0.1"
             android:textStyle="bold"
             android:layout_marginTop="10dp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Secure Media Framework"
-            android:textColor="#5F6368"
-            android:textSize="14sp"
-            android:layout_marginBottom="50dp" />
-
         <androidx.cardview.widget.CardView
             android:id="@+id/card_camera"
             android:layout_width="match_parent"
             android:layout_height="100dp"
             app:cardCornerRadius="12dp"
             app:cardElevation="4dp"
-            app:cardBackgroundColor="#FFFFFF"
-            android:layout_marginBottom="16dp"
+            android:layout_marginTop="40dp"
             android:clickable="true"
             android:focusable="true">
             <RelativeLayout android:layout_width="match_parent" android:layout_height="match_parent" android:padding="16dp">
@@ -79,21 +104,5 @@
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Hardware-encrypted camera" android:textColor="#5F6368" android:layout_alignParentBottom="true"/>
             </RelativeLayout>
         </androidx.cardview.widget.CardView>
-
-        <androidx.cardview.widget.CardView
-            android:id="@+id/card_vault"
-            android:layout_width="match_parent"
-            android:layout_height="100dp"
-            app:cardCornerRadius="12dp"
-            app:cardElevation="4dp"
-            app:cardBackgroundColor="#FFFFFF"
-            android:clickable="true"
-            android:focusable="true">
-            <RelativeLayout android:layout_width="match_parent" android:layout_height="match_parent" android:padding="16dp">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Encrypted Vault" android:textColor="#1A73E8" android:textStyle="bold" android:textSize="18sp"/>
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="View your protected media" android:textColor="#5F6368" android:layout_alignParentBottom="true"/>
-            </RelativeLayout>
-        </androidx.cardview.widget.CardView>
-
     </LinearLayout>
 </RelativeLayout>
