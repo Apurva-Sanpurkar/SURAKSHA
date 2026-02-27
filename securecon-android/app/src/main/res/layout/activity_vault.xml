@@ -1,0 +1,32 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#121212"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="SECURE VAULT"
+        android:textColor="#00E676"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_gravity="center"
+        android:layout_marginBottom="20dp"/>
+
+    <ImageView
+        android:id="@+id/decryptedImageView"
+        android:layout_width="match_parent"
+        android:layout_height="400dp"
+        android:scaleType="fitCenter"
+        android:layout_marginBottom="20dp"
+        android:background="#1A1A1A"/>
+
+    <Button
+        android:id="@+id/btn_select_file"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="Select .sec File to Decrypt" />
+
+</LinearLayout>

@@ -1,19 +1,58 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="#0F0F0F">
 
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/dashboard_ui"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="SURAKSHA"
+            android:textColor="#00E676"
+            android:textSize="36sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="60dp"/>
+
+        <Button
+            android:id="@+id/btn_goto_camera"
+            android:layout_width="280dp"
+            android:layout_height="70dp"
+            android:text="Secure Capture"
+            android:textSize="18sp"
+            android:layout_marginBottom="20dp"
+            android:backgroundTint="#1B5E20"/>
+
+        <Button
+            android:id="@+id/btn_goto_vault"
+            android:layout_width="280dp"
+            android:layout_height="70dp"
+            android:text="View Vault"
+            android:textSize="18sp"
+            android:backgroundTint="#37474F"/>
+    </LinearLayout>
 
     <Button
         android:id="@+id/capture_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Secure Capture"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:text="📸"
+        android:visibility="gone"
         android:layout_alignParentBottom="true"
         android:layout_centerHorizontal="true"
-        android:layout_marginBottom="50dp" />
+        android:layout_marginBottom="40dp"
+        android:backgroundTint="#D32F2F"/>
 
 </RelativeLayout>
