@@ -7,9 +7,10 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import java.io.File
+import java.io.FileInputStream
 import java.security.KeyStore
-import java.security.PrivateKey
 import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
 
 class VaultActivity : AppCompatActivity() {
 
@@ -18,16 +19,11 @@ class VaultActivity : AppCompatActivity() {
         setContentView(R.layout.activity_vault)
 
         findViewById<Button>(R.id.btn_select_file).setOnClickListener {
-            val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Suraksha")
+            val folder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             val files = folder.listFiles { f -> f.extension == "sec" } ?: arrayOf()
             
-            if (files.isEmpty()) {
-                Toast.makeText(this, "No secure files found.", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
             val names = files.map { it.name }.toTypedArray()
-            AlertDialog.Builder(this).setTitle("Open Secure Photo").setItems(names) { _, i ->
+            AlertDialog.Builder(this).setTitle("Open File").setItems(names) { _, i ->
                 decryptFile(files[i])
             }.show()
         }
@@ -35,19 +31,35 @@ class VaultActivity : AppCompatActivity() {
 
     private fun decryptFile(file: File) {
         try {
-            val encryptedBytes = file.readBytes()
-            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            val privateKey = ks.getKey("suraksha_id", null) as PrivateKey
-
-            val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
-            cipher.init(Cipher.DECRYPT_MODE, privateKey)
+            val fis = FileInputStream(file)
             
-            val decryptedBytes = cipher.doFinal(encryptedBytes)
-            val bitmap = BitmapFactory.decodeByteArray(decryptedBytes, 0, decryptedBytes.size)
+            // 1. Read Key Size and Encrypted AES Key
+            val keySize = fis.read()
+            val encryptedAesKey = ByteArray(keySize)
+            fis.read(encryptedAesKey)
+
+            // 2. Read Encrypted Photo
+            val encryptedPhoto = fis.readBytes()
+
+            // 3. Decrypt AES Key using RSA Private Key
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val privateKey = ks.getKey("suraksha_id", null) as java.security.PrivateKey
+            
+            val rsaCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+            rsaCipher.init(Cipher.DECRYPT_MODE, privateKey)
+            val aesKeyBytes = rsaCipher.doFinal(encryptedAesKey)
+            val aesKey = SecretKeySpec(aesKeyBytes, "AES")
+
+            // 4. Decrypt Photo using AES Key
+            val aesCipher = Cipher.getInstance("AES")
+            aesCipher.init(Cipher.DECRYPT_MODE, aesKey)
+            val photoBytes = aesCipher.doFinal(encryptedPhoto)
+
+            val bitmap = BitmapFactory.decodeByteArray(photoBytes, 0, photoBytes.size)
             findViewById<ImageView>(R.id.decryptedImageView).setImageBitmap(bitmap)
-            Toast.makeText(this, "Decryption Successful!", Toast.LENGTH_SHORT).show()
+            
         } catch (e: Exception) {
-            Toast.makeText(this, "Error: You do not have the key for this file.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Decryption Failed", Toast.LENGTH_SHORT).show()
         }
     }
 }
