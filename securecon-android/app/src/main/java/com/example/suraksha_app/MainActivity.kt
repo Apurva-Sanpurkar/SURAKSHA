@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraContainer: View
     private lateinit var postCapturePreview: View
     private lateinit var capturedImageView: ImageView
+    private lateinit var statusIndicator: TextView // New: For showing connection state
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,8 +51,12 @@ class MainActivity : AppCompatActivity() {
         cameraContainer = findViewById(R.id.camera_container)
         postCapturePreview = findViewById(R.id.post_capture_preview)
         capturedImageView = findViewById(R.id.captured_image_view)
+        
+        // Initialize the status indicator if you added it to XML
+        statusIndicator = findViewById(R.id.status_indicator) 
 
         ensureHardwareIdentity()
+        updateStatusUI() // Show current security state on launch
 
         findViewById<CardView>(R.id.card_camera).setOnClickListener {
             if (allPermissionsGranted()) openCameraUI()
@@ -71,7 +76,24 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_discard).setOnClickListener {
             postCapturePreview.visibility = View.GONE
             cameraContainer.visibility = View.VISIBLE
-            startCamera()
+            startCamera() // Re-bind camera logic
+        }
+
+        findViewById<ImageButton>(R.id.btn_back_to_dash).setOnClickListener {
+            cameraContainer.visibility = View.GONE
+            dashboard.visibility = View.VISIBLE
+        }
+    }
+
+    // New: Updates the UI to show if you are linked or in test mode
+    private fun updateStatusUI() {
+        val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
+        if (savedKey != null) {
+            statusIndicator.text = "SECURELY LINKED"
+            statusIndicator.setTextColor(Color.parseColor("#34A853")) // Green
+        } else {
+            statusIndicator.text = "LOCAL TEST MODE"
+            statusIndicator.setTextColor(Color.parseColor("#1A73E8")) // Blue
         }
     }
 
@@ -87,8 +109,17 @@ class MainActivity : AppCompatActivity() {
             val text = clipData.getItemAt(0).text?.toString() ?: ""
             if (text.contains("suraksha://add-key")) {
                 val uri = Uri.parse(text.substring(text.indexOf("suraksha://")))
-                showAddContactDialog(uri)
-                clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                
+                // Extract key to compare with our own
+                val incomingKey = uri.getQueryParameter("key") ?: ""
+                val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                val myPubKey = Base64.encodeToString(ks.getCertificate("suraksha_id").publicKey.encoded, Base64.URL_SAFE or Base64.NO_WRAP)
+
+                // Only show dialog if it's NOT our own key (prevents self-add loop)
+                if (incomingKey != myPubKey) {
+                    showAddContactDialog(uri)
+                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                }
             }
         }
     }
@@ -97,18 +128,12 @@ class MainActivity : AppCompatActivity() {
         val name = uri.getQueryParameter("name") ?: "Contact"
         val key = uri.getQueryParameter("key") ?: ""
         
-        // Check if the key being added is actually our own (Single phone test)
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val myPubKey = Base64.encodeToString(ks.getCertificate("suraksha_id").publicKey.encoded, Base64.URL_SAFE or Base64.NO_WRAP)
-        
-        val message = if (key == myPubKey) "This is your own identity. Syncing will allow you to test encryption locally." 
-                      else "Add $name as a trusted contact?"
-
         AlertDialog.Builder(this)
             .setTitle("Handshake Detected")
-            .setMessage(message)
+            .setMessage("Add $name as a trusted contact?")
             .setPositiveButton("Add") { _, _ ->
                 getSharedPreferences("Contacts", MODE_PRIVATE).edit().putString("saved_key", key).apply()
+                updateStatusUI()
                 Toast.makeText(this, "Sync Successful!", Toast.LENGTH_SHORT).show()
             }.setNegativeButton("Ignore", null).show()
     }
@@ -133,11 +158,17 @@ class MainActivity : AppCompatActivity() {
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(findViewById<PreviewView>(R.id.viewFinder).surfaceProvider)
             }
-            imageCapture = ImageCapture.Builder().build()
+            // CRITICAL: Force initialization of ImageCapture
+            imageCapture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .build()
+                
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
-            } catch (exc: Exception) { }
+            } catch (exc: Exception) { 
+                Toast.makeText(this, "Camera initialization failed", Toast.LENGTH_SHORT).show()
+            }
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -148,7 +179,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun takeSecurePhoto() {
-        imageCapture?.takePicture(ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageCapturedCallback() {
+        val capture = imageCapture ?: return
+        capture.takePicture(ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 val buffer = image.planes[0].buffer
                 val bytes = ByteArray(buffer.remaining())
@@ -156,7 +188,9 @@ class MainActivity : AppCompatActivity() {
                 image.close()
                 saveAndShowPreview(bytes)
             }
-            override fun onError(exc: ImageCaptureException) {}
+            override fun onError(exc: ImageCaptureException) {
+                Toast.makeText(baseContext, "Photo capture failed", Toast.LENGTH_SHORT).show()
+            }
         })
     }
 
@@ -170,7 +204,6 @@ class MainActivity : AppCompatActivity() {
             val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
             val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
             
-            // LOGIC: Use synced key if available, otherwise use OWN key for local testing
             val encryptedData = if (savedKey != null) {
                 val keyBytes = Base64.decode(savedKey, Base64.URL_SAFE)
                 val publicKey = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(keyBytes))
@@ -191,7 +224,9 @@ class MainActivity : AppCompatActivity() {
                 cameraContainer.visibility = View.GONE
                 postCapturePreview.visibility = View.VISIBLE
             }
-        } catch (e: Exception) { }
+        } catch (e: Exception) { 
+            runOnUiThread { Toast.makeText(this, "Encryption Error", Toast.LENGTH_SHORT).show() }
+        }
     }
 
     private fun shareEncryptedFile() {
