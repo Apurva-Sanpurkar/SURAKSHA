@@ -35,7 +35,6 @@ class MainActivity : AppCompatActivity() {
     private var latestBitmap: Bitmap? = null
     private var latestEncryptedFile: File? = null
 
-    // UI elements
     private lateinit var dashboard: View
     private lateinit var cameraContainer: View
     private lateinit var postCapturePreview: View
@@ -46,37 +45,42 @@ class MainActivity : AppCompatActivity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_main)
 
-        // Initialize Views
         dashboard = findViewById(R.id.dashboard_ui)
         cameraContainer = findViewById(R.id.camera_container)
         postCapturePreview = findViewById(R.id.post_capture_preview)
         capturedImageView = findViewById(R.id.captured_image_view)
 
-        // 1. Setup Hardware Identity
         ensureHardwareIdentity()
         handleIncomingHandshake(intent)
 
-        // 2. Button Listeners
         findViewById<CardView>(R.id.card_camera).setOnClickListener {
             dashboard.visibility = View.GONE
             cameraContainer.visibility = View.VISIBLE
             startCamera()
         }
 
-        // Add this to your XML as a button/card for inviting others
-        findViewById<Button>(R.id.btn_invite_contact).setOnClickListener {
+        findViewById<CardView>(R.id.card_vault).setOnClickListener {
+            startActivity(Intent(this, VaultActivity::class.java))
+        }
+
+        findViewById<CardView>(R.id.btn_invite_contact).setOnClickListener {
             shareInviteLink()
         }
 
         findViewById<Button>(R.id.capture_button).setOnClickListener { takeSecurePhoto() }
+
         findViewById<Button>(R.id.btn_share_now).setOnClickListener { shareEncryptedFile() }
+
         findViewById<Button>(R.id.btn_discard).setOnClickListener {
             postCapturePreview.visibility = View.GONE
             cameraContainer.visibility = View.VISIBLE
         }
-    }
 
-    // --- SECURITY HANDSHAKE LOGIC ---
+        findViewById<ImageButton>(R.id.btn_back_to_dash).setOnClickListener {
+            cameraContainer.visibility = View.GONE
+            dashboard.visibility = View.VISIBLE
+        }
+    }
 
     private fun ensureHardwareIdentity() {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -114,8 +118,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- CAMERA & PREVIEW LOGIC ---
-
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
@@ -144,21 +146,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveAndShowPreview(data: ByteArray) {
         try {
-            // Create Local Encrypted Copy
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Suraksha")
             if (!folder.exists()) folder.mkdirs()
             val file = File(folder, "SEC_$timeStamp.sec")
             
-            // For Phase 1 demo, we save the raw bytes encrypted via public key if available
             val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
-            if (savedKey != null) {
-                val encryptedData = encryptWithPublicKey(data, savedKey)
-                FileOutputStream(file).use { it.write(encryptedData) }
-            } else {
-                FileOutputStream(file).use { it.write(data) } // Fallback to raw for testing
-            }
+            val dataToSave = if (savedKey != null) encryptWithPublicKey(data, savedKey) else data
 
+            FileOutputStream(file).use { it.write(dataToSave) }
             latestEncryptedFile = file
             latestBitmap = BitmapFactory.decodeByteArray(data, 0, data.size)
 
