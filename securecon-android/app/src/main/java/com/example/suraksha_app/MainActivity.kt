@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.cardview.widget.CardView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.security.crypto.EncryptedFile
@@ -40,7 +41,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Security: Prevent screenshots
+        // Security: Prevent screenshots and screen recording
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_main)
 
@@ -50,17 +51,17 @@ class MainActivity : AppCompatActivity() {
         viewFinder = findViewById(R.id.viewFinder)
         captureBtn = findViewById(R.id.capture_button)
 
-        // Dashboard Navigation
-        findViewById<Button>(R.id.btn_goto_camera).setOnClickListener {
+        // Professional Card-based Navigation
+        findViewById<CardView>(R.id.card_camera).setOnClickListener {
             switchToCamera()
         }
 
-        findViewById<Button>(R.id.btn_goto_vault).setOnClickListener {
+        findViewById<CardView>(R.id.card_vault).setOnClickListener {
             val intent = Intent(this, VaultActivity::class.java)
             startActivity(intent)
         }
 
-        // Camera Navigation & Action
+        // Camera Navigation (Back Button)
         findViewById<ImageButton>(R.id.btn_back_to_dash).setOnClickListener {
             closeCamera()
         }
@@ -73,7 +74,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun switchToCamera() {
-        // UI toggle must happen BEFORE camera start to avoid black screen
+        // Toggle UI visibility before starting camera to prevent black screen
         dashboard.visibility = View.GONE
         cameraContainer.visibility = View.VISIBLE
         
@@ -85,7 +86,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun closeCamera() {
-        // Release camera hardware
+        // Unbind camera hardware to free up resources
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
@@ -118,7 +119,7 @@ class MainActivity : AppCompatActivity() {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture)
             } catch (exc: Exception) {
-                Toast.makeText(this, "Camera bind failed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Camera Error: ${exc.message}", Toast.LENGTH_SHORT).show()
             }
 
         }, ContextCompat.getMainExecutor(this))
@@ -126,6 +127,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun takeSecurePhoto() {
         val imageCapture = imageCapture ?: return
+        Toast.makeText(this, "Encrypting...", Toast.LENGTH_SHORT).show()
 
         imageCapture.takePicture(
             ContextCompat.getMainExecutor(this),
@@ -148,16 +150,20 @@ class MainActivity : AppCompatActivity() {
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
 
-            // Human readable filename with timestamp
+            // Better Filename: SEC_YYYYMMDD_HHMMSS.sec
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "SEC_$timeStamp.sec"
             
-            // Save to public Downloads/Suraksha folder
+            // Save to Public Downloads/Suraksha for easy retrieval
             val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Suraksha")
             if (!folder.exists()) folder.mkdirs()
             val file = File(folder, fileName)
 
-            val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            // AES-256 GCM Encryption via Jetpack Security
+            val masterKey = MasterKey.Builder(this)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+
             val encryptedFile = EncryptedFile.Builder(
                 this, file, masterKey,
                 EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB
@@ -166,8 +172,8 @@ class MainActivity : AppCompatActivity() {
             encryptedFile.openFileOutput().use { it.write(bytes) }
 
             runOnUiThread {
-                Toast.makeText(this, "Encrypted: $fileName", Toast.LENGTH_SHORT).show()
-                closeCamera() // Automatically return to dash after capture
+                Toast.makeText(this, "Saved: $fileName", Toast.LENGTH_LONG).show()
+                closeCamera() // Auto-return to dashboard after capture
             }
 
         } catch (e: Exception) {
@@ -191,7 +197,11 @@ class MainActivity : AppCompatActivity() {
         private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(Manifest.permission.CAMERA)
         } else {
-            arrayOf(Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            arrayOf(
+                Manifest.permission.CAMERA, 
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            )
         }
     }
 }
