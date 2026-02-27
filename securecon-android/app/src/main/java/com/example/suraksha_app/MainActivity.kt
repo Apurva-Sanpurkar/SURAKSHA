@@ -54,11 +54,8 @@ class MainActivity : AppCompatActivity() {
         ensureHardwareIdentity()
 
         findViewById<CardView>(R.id.card_camera).setOnClickListener {
-            if (allPermissionsGranted()) {
-                openCameraUI()
-            } else {
-                ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, 10)
-            }
+            if (allPermissionsGranted()) openCameraUI()
+            else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
         }
 
         findViewById<CardView>(R.id.card_vault).setOnClickListener {
@@ -70,28 +67,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.capture_button).setOnClickListener { takeSecurePhoto() }
-        
         findViewById<Button>(R.id.btn_share_now).setOnClickListener { shareEncryptedFile() }
-        
         findViewById<Button>(R.id.btn_discard).setOnClickListener {
             postCapturePreview.visibility = View.GONE
             cameraContainer.visibility = View.VISIBLE
-        }
-
-        findViewById<ImageButton>(R.id.btn_back_to_dash).setOnClickListener {
-            cameraContainer.visibility = View.GONE
-            dashboard.visibility = View.VISIBLE
+            startCamera()
         }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) { checkClipboardForHandshake() }
+        if (hasFocus) checkClipboardForHandshake()
     }
 
     private fun checkClipboardForHandshake() {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        // FIX: Using primaryClip instead of primaryData
         val clipData = clipboard.primaryClip
         if (clipData != null && clipData.itemCount > 0) {
             val text = clipData.getItemAt(0).text?.toString() ?: ""
@@ -104,18 +94,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAddContactDialog(uri: Uri) {
-        val name = uri.getQueryParameter("name") ?: "New Contact"
+        val name = uri.getQueryParameter("name") ?: "Contact"
         val key = uri.getQueryParameter("key") ?: ""
+        
+        // Check if the key being added is actually our own (Single phone test)
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val myPubKey = Base64.encodeToString(ks.getCertificate("suraksha_id").publicKey.encoded, Base64.URL_SAFE or Base64.NO_WRAP)
+        
+        val message = if (key == myPubKey) "This is your own identity. Syncing will allow you to test encryption locally." 
+                      else "Add $name as a trusted contact?"
 
         AlertDialog.Builder(this)
-            .setTitle("Identity Sync Detected")
-            .setMessage("Add $name as a trusted contact?")
+            .setTitle("Handshake Detected")
+            .setMessage(message)
             .setPositiveButton("Add") { _, _ ->
-                getSharedPreferences("Contacts", MODE_PRIVATE).edit()
-                    .putString("saved_key", key).apply()
-                Toast.makeText(this, "$name added!", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Ignore", null).show()
+                getSharedPreferences("Contacts", MODE_PRIVATE).edit().putString("saved_key", key).apply()
+                Toast.makeText(this, "Sync Successful!", Toast.LENGTH_SHORT).show()
+            }.setNegativeButton("Ignore", null).show()
     }
 
     private fun ensureHardwareIdentity() {
@@ -131,29 +126,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun shareInviteLink() {
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val publicKey = ks.getCertificate("suraksha_id").publicKey
-        val keyBase64 = Base64.encodeToString(publicKey.encoded, Base64.URL_SAFE or Base64.NO_WRAP)
-        val message = "Connect with me on Suraksha! Copy this message and open the app:\nsuraksha://add-key?name=Adishree&key=$keyBase64"
-        
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, message)
-        }
-        startActivity(Intent.createChooser(intent, "Share Invite"))
-    }
-
-    private fun openCameraUI() {
-        dashboard.visibility = View.GONE
-        cameraContainer.visibility = View.VISIBLE
-        startCamera()
-    }
-
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+            val cameraProvider = cameraProviderFuture.get()
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(findViewById<PreviewView>(R.id.viewFinder).surfaceProvider)
             }
@@ -163,6 +139,12 @@ class MainActivity : AppCompatActivity() {
                 cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
             } catch (exc: Exception) { }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun openCameraUI() {
+        dashboard.visibility = View.GONE
+        cameraContainer.visibility = View.VISIBLE
+        startCamera()
     }
 
     private fun takeSecurePhoto() {
@@ -186,9 +168,21 @@ class MainActivity : AppCompatActivity() {
             val file = File(folder, "SEC_$timeStamp.sec")
             
             val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
-            val dataToSave = if (savedKey != null) encryptWithPublicKey(data, savedKey) else data
+            val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+            
+            // LOGIC: Use synced key if available, otherwise use OWN key for local testing
+            val encryptedData = if (savedKey != null) {
+                val keyBytes = Base64.decode(savedKey, Base64.URL_SAFE)
+                val publicKey = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(keyBytes))
+                cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+                cipher.doFinal(data)
+            } else {
+                val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                cipher.init(Cipher.ENCRYPT_MODE, ks.getCertificate("suraksha_id").publicKey)
+                cipher.doFinal(data)
+            }
 
-            FileOutputStream(file).use { it.write(dataToSave) }
+            FileOutputStream(file).use { it.write(encryptedData) }
             latestEncryptedFile = file
             latestBitmap = BitmapFactory.decodeByteArray(data, 0, data.size)
 
@@ -200,31 +194,32 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) { }
     }
 
-    private fun encryptWithPublicKey(data: ByteArray, keyBase64: String): ByteArray {
-        val keyBytes = Base64.decode(keyBase64, Base64.URL_SAFE)
-        val publicKey = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(keyBytes))
-        val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
-        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
-        return cipher.doFinal(data)
-    }
-
     private fun shareEncryptedFile() {
         val file = latestEncryptedFile ?: return
-        val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/octet-stream"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/octet-stream"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, "Share .sec File"))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Sharing error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
-        startActivity(Intent.createChooser(intent, "Send Secure .sec File"))
     }
 
-    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
-        ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
+    private fun shareInviteLink() {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val publicKey = ks.getCertificate("suraksha_id").publicKey
+        val keyBase64 = Base64.encodeToString(publicKey.encoded, Base64.URL_SAFE or Base64.NO_WRAP)
+        val link = "suraksha://add-key?name=User&key=$keyBase64"
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "Suraksha Invite:\n$link")
+        }
+        startActivity(Intent.createChooser(intent, "Share Invite"))
     }
 
-    // FIX: Added missing REQUIRED_PERMISSIONS and companion object
-    companion object {
-        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
-    }
+    private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 }
