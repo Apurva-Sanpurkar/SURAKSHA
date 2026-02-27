@@ -133,17 +133,12 @@ class MainActivity : AppCompatActivity() {
    
 private fun saveAndShowPreview(photoBytes: ByteArray) {
     try {
-        // 1. Generate AES Key
-        val keyGen = KeyGenerator.getInstance("AES")
-        keyGen.init(256)
-        val aesKey = keyGen.generateKey()
-
-        // 2. Encrypt Photo with AES
-        val aesCipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
-        aesCipher.init(Cipher.ENCRYPT_MODE, aesKey)
+        val aesKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val aesCipher = Cipher.getInstance("AES/ECB/PKCS5Padding").apply { 
+            init(Cipher.ENCRYPT_MODE, aesKey) 
+        }
         val encryptedPhoto = aesCipher.doFinal(photoBytes)
 
-        // 3. Encrypt AES Key with RSA
         val rsaCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
         val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
         val publicKey = if (savedKey != null) {
@@ -156,20 +151,15 @@ private fun saveAndShowPreview(photoBytes: ByteArray) {
         rsaCipher.init(Cipher.ENCRYPT_MODE, publicKey)
         val encryptedAesKey = rsaCipher.doFinal(aesKey.encoded)
 
-        // 4. SAVE FILE with fixed header size
+        // SAVE LOGIC
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Suraksha")
         if (!folder.exists()) folder.mkdirs()
         val file = File(folder, "SEC_$timeStamp.sec")
         
         FileOutputStream(file).use { fos ->
-            // Use 4 bytes to store the length of the RSA-encrypted key
-            val keyLength = encryptedAesKey.size
-            fos.write(keyLength shr 24)
-            fos.write(keyLength shr 16)
-            fos.write(keyLength shr 8)
-            fos.write(keyLength)
-            
+            val len = encryptedAesKey.size
+            fos.write(byteArrayOf((len shr 24).toByte(), (len shr 16).toByte(), (len shr 8).toByte(), len.toByte()))
             fos.write(encryptedAesKey)
             fos.write(encryptedPhoto)
         }
@@ -184,7 +174,6 @@ private fun saveAndShowPreview(photoBytes: ByteArray) {
         runOnUiThread { Toast.makeText(this, "Encryption Error: ${e.message}", Toast.LENGTH_LONG).show() }
     }
 }
-
 private fun decryptFile(file: File) {
     try {
         val bytes = file.readBytes()
