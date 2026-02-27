@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.suraksha_app">
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -28,7 +29,6 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="suraksha" android:host="add-key" />
             </intent-filter>
-            
         </activity>
 
         <activity android:name=".VaultActivity" android:exported="false" />
