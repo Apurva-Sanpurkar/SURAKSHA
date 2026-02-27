@@ -130,53 +130,100 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- HYBRID ENCRYPTION ENGINE ---
-    private fun saveAndShowPreview(photoBytes: ByteArray) {
-        try {
-            // 1. Generate AES Key
-            val keyGen = KeyGenerator.getInstance("AES")
-            keyGen.init(256)
-            val aesKey = keyGen.generateKey()
+   
+private fun saveAndShowPreview(photoBytes: ByteArray) {
+    try {
+        // 1. Generate AES Key
+        val keyGen = KeyGenerator.getInstance("AES")
+        keyGen.init(256)
+        val aesKey = keyGen.generateKey()
 
-            // 2. Encrypt Photo with AES
-            val aesCipher = Cipher.getInstance("AES")
-            aesCipher.init(Cipher.ENCRYPT_MODE, aesKey)
-            val encryptedPhoto = aesCipher.doFinal(photoBytes)
+        // 2. Encrypt Photo with AES
+        val aesCipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
+        aesCipher.init(Cipher.ENCRYPT_MODE, aesKey)
+        val encryptedPhoto = aesCipher.doFinal(photoBytes)
 
-            // 3. Encrypt AES Key with RSA (Public Key)
-            val rsaCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
-            val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
-            
-            val publicKey = if (savedKey != null) {
-                val keyBytes = Base64.decode(savedKey, Base64.URL_SAFE)
-                KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(keyBytes))
-            } else {
-                val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-                ks.getCertificate("suraksha_id").publicKey
-            }
-
-            rsaCipher.init(Cipher.ENCRYPT_MODE, publicKey)
-            val encryptedAesKey = rsaCipher.doFinal(aesKey.encoded)
-
-            // 4. Save to File: [Size of Key][Encrypted Key][Encrypted Photo]
-            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "SEC_$timeStamp.sec")
-            
-            FileOutputStream(file).use { fos ->
-                fos.write(encryptedAesKey.size) // Write key size first
-                fos.write(encryptedAesKey)
-                fos.write(encryptedPhoto)
-            }
-            
-            latestEncryptedFile = file
-            runOnUiThread {
-                capturedImageView.setImageBitmap(BitmapFactory.decodeByteArray(photoBytes, 0, photoBytes.size))
-                cameraContainer.visibility = View.GONE
-                postCapturePreview.visibility = View.VISIBLE
-            }
-        } catch (e: Exception) {
-            runOnUiThread { Toast.makeText(this, "Encryption Error: ${e.message}", Toast.LENGTH_LONG).show() }
+        // 3. Encrypt AES Key with RSA
+        val rsaCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+        val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
+        val publicKey = if (savedKey != null) {
+            val keyBytes = Base64.decode(savedKey, Base64.URL_SAFE)
+            KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(keyBytes))
+        } else {
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            ks.getCertificate("suraksha_id").publicKey
         }
+        rsaCipher.init(Cipher.ENCRYPT_MODE, publicKey)
+        val encryptedAesKey = rsaCipher.doFinal(aesKey.encoded)
+
+        // 4. SAVE FILE with fixed header size
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Suraksha")
+        if (!folder.exists()) folder.mkdirs()
+        val file = File(folder, "SEC_$timeStamp.sec")
+        
+        FileOutputStream(file).use { fos ->
+            // Use 4 bytes to store the length of the RSA-encrypted key
+            val keyLength = encryptedAesKey.size
+            fos.write(keyLength shr 24)
+            fos.write(keyLength shr 16)
+            fos.write(keyLength shr 8)
+            fos.write(keyLength)
+            
+            fos.write(encryptedAesKey)
+            fos.write(encryptedPhoto)
+        }
+        
+        latestEncryptedFile = file
+        runOnUiThread {
+            capturedImageView.setImageBitmap(BitmapFactory.decodeByteArray(photoBytes, 0, photoBytes.size))
+            cameraContainer.visibility = View.GONE
+            postCapturePreview.visibility = View.VISIBLE
+        }
+    } catch (e: Exception) {
+        runOnUiThread { Toast.makeText(this, "Encryption Error: ${e.message}", Toast.LENGTH_LONG).show() }
     }
+}
+
+private fun decryptFile(file: File) {
+    try {
+        val bytes = file.readBytes()
+        val inputStream = java.io.ByteArrayInputStream(bytes)
+
+        // 1. Read the 4-byte key length header
+        val b1 = inputStream.read()
+        val b2 = inputStream.read()
+        val b3 = inputStream.read()
+        val b4 = inputStream.read()
+        val keyLength = (b1 shl 24) or (b2 shl 16) or (b3 shl 8) or b4
+
+        // 2. Extract Encrypted AES Key
+        val encryptedAesKey = ByteArray(keyLength)
+        inputStream.read(encryptedAesKey)
+
+        // 3. Extract Encrypted Photo
+        val encryptedPhoto = inputStream.readBytes()
+
+        // 4. Decrypt AES Key using RSA Private Key
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val privateKey = ks.getKey("suraksha_id", null) as java.security.PrivateKey
+        val rsaCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+        rsaCipher.init(Cipher.DECRYPT_MODE, privateKey)
+        val aesKeyBytes = rsaCipher.doFinal(encryptedAesKey)
+        val aesKey = SecretKeySpec(aesKeyBytes, "AES")
+
+        // 5. Decrypt Photo using AES
+        val aesCipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
+        aesCipher.init(Cipher.DECRYPT_MODE, aesKey)
+        val photoBytes = aesCipher.doFinal(encryptedPhoto)
+
+        val bitmap = BitmapFactory.decodeByteArray(photoBytes, 0, photoBytes.size)
+        findViewById<ImageView>(R.id.decryptedImageView).setImageBitmap(bitmap)
+        
+    } catch (e: Exception) {
+        Toast.makeText(this, "Decryption Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+    }
+}
 
     private fun shareEncryptedFile() {
         val file = latestEncryptedFile ?: return
