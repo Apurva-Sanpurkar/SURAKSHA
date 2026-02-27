@@ -1,6 +1,7 @@
 package com.example.suraksha_app
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -41,26 +42,19 @@ class MainActivity : AppCompatActivity() {
         viewFinder = findViewById(R.id.viewFinder)
         captureBtn = findViewById(R.id.capture_button)
 
-        // Switch to Camera Mode
         findViewById<Button>(R.id.btn_goto_camera).setOnClickListener {
             switchToCamera()
         }
 
-        // Vault placeholder
         findViewById<Button>(R.id.btn_goto_vault).setOnClickListener {
-            Toast.makeText(this, "Vault Decryption Coming Next!", Toast.LENGTH_SHORT).show()
+            val intent = Intent(this, VaultActivity::class.java)
+            startActivity(intent)
         }
 
         captureBtn.setOnClickListener { takeSecurePhoto() }
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
-     
-    findViewById<Button>(R.id.btn_goto_vault).setOnClickListener {
-    val intent = Intent(this, VaultActivity::class.java)
-    startActivity(intent)
-}
- 
     private fun switchToCamera() {
         dashboard.visibility = View.GONE
         viewFinder.visibility = View.VISIBLE
@@ -112,7 +106,6 @@ class MainActivity : AppCompatActivity() {
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
 
-            // Human Readable Filename
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "SEC_$timeStamp.sec"
             
@@ -127,7 +120,6 @@ class MainActivity : AppCompatActivity() {
 
             runOnUiThread {
                 Toast.makeText(this, "Encrypted: $fileName", Toast.LENGTH_SHORT).show()
-                // Return to Dashboard after success
                 dashboard.visibility = View.VISIBLE
                 viewFinder.visibility = View.GONE
                 captureBtn.visibility = View.GONE
@@ -149,4 +141,4 @@ class MainActivity : AppCompatActivity() {
             arrayOf(Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
-}yes 
+}
