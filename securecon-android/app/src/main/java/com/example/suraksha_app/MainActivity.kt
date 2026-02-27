@@ -1,7 +1,7 @@
 package com.example.suraksha_app
 
 import android.Manifest
-import android.content.Intent
+import android.content.*
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.net.Uri
@@ -11,6 +11,7 @@ import android.util.Base64
 import android.view.View
 import android.view.WindowManager
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -35,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private var latestBitmap: Bitmap? = null
     private var latestEncryptedFile: File? = null
 
+    // UI Layers
     private lateinit var dashboard: View
     private lateinit var cameraContainer: View
     private lateinit var postCapturePreview: View
@@ -42,25 +44,32 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Block screenshots for security
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_main)
 
+        // Initialize Views
         dashboard = findViewById(R.id.dashboard_ui)
         cameraContainer = findViewById(R.id.camera_container)
         postCapturePreview = findViewById(R.id.post_capture_preview)
         capturedImageView = findViewById(R.id.captured_image_view)
 
+        // Setup Security Identity
         ensureHardwareIdentity()
-        handleIncomingHandshake(intent)
-
+        
+        // Setup Click Listeners
         findViewById<CardView>(R.id.card_camera).setOnClickListener {
-            dashboard.visibility = View.GONE
-            cameraContainer.visibility = View.VISIBLE
-            startCamera()
+            if (allPermissionsGranted()) {
+                openCameraUI()
+            } else {
+                ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, 10)
+            }
         }
 
         findViewById<CardView>(R.id.card_vault).setOnClickListener {
-            startActivity(Intent(this, VaultActivity::class.java))
+            // Intent to VaultActivity (ensure you have created this class)
+            val intent = Intent(this, VaultActivity::class.java)
+            startActivity(intent)
         }
 
         findViewById<CardView>(R.id.btn_invite_contact).setOnClickListener {
@@ -68,9 +77,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.capture_button).setOnClickListener { takeSecurePhoto() }
-
+        
         findViewById<Button>(R.id.btn_share_now).setOnClickListener { shareEncryptedFile() }
-
+        
         findViewById<Button>(R.id.btn_discard).setOnClickListener {
             postCapturePreview.visibility = View.GONE
             cameraContainer.visibility = View.VISIBLE
@@ -81,6 +90,46 @@ class MainActivity : AppCompatActivity() {
             dashboard.visibility = View.VISIBLE
         }
     }
+
+    // --- AUTOMATIC HANDSHAKE LOGIC ---
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            checkClipboardForHandshake()
+        }
+    }
+
+    private fun checkClipboardForHandshake() {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        val item = clipboard.primaryData?.getItemAt(0)
+        val text = item?.text?.toString() ?: ""
+
+        if (text.contains("suraksha://add-key")) {
+            val uri = Uri.parse(text.substring(text.indexOf("suraksha://")))
+            showAddContactDialog(uri)
+            // Clear clipboard so the popup doesn't annoy the user
+            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+        }
+    }
+
+    private fun showAddContactDialog(uri: Uri) {
+        val name = uri.getQueryParameter("name") ?: "New Contact"
+        val key = uri.getQueryParameter("key") ?: ""
+
+        AlertDialog.Builder(this)
+            .setTitle("Identity Sync Detected")
+            .setMessage("New contact '$name' found in your clipboard. Add them as a trusted receiver?")
+            .setPositiveButton("Add Contact") { _, _ ->
+                getSharedPreferences("Contacts", MODE_PRIVATE).edit()
+                    .putString("saved_key", key).apply()
+                Toast.makeText(this, "Handshake with $name successful!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Ignore", null)
+            .show()
+    }
+
+    // --- SECURITY & CRYPTO ---
 
     private fun ensureHardwareIdentity() {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -101,21 +150,21 @@ class MainActivity : AppCompatActivity() {
         val keyBase64 = Base64.encodeToString(publicKey.encoded, Base64.URL_SAFE or Base64.NO_WRAP)
         
         val link = "suraksha://add-key?name=Adishree&key=$keyBase64"
+        val message = "Connect with me on Suraksha! Copy this entire message and open your app to sync:\n\n$link"
+        
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, "Connect with me on Suraksha: $link")
+            putExtra(Intent.EXTRA_TEXT, message)
         }
-        startActivity(Intent.createChooser(intent, "Share Invite"))
+        startActivity(Intent.createChooser(intent, "Share Identity Link"))
     }
 
-    private fun handleIncomingHandshake(intent: Intent) {
-        val data: Uri? = intent.data
-        if (data != null && data.scheme == "suraksha") {
-            val name = data.getQueryParameter("name") ?: "Contact"
-            val key = data.getQueryParameter("key") ?: ""
-            getSharedPreferences("Contacts", MODE_PRIVATE).edit().putString("saved_key", key).apply()
-            Toast.makeText(this, "Handshake with $name Successful!", Toast.LENGTH_LONG).show()
-        }
+    // --- CAMERA ENGINE ---
+
+    private fun openCameraUI() {
+        dashboard.visibility = View.GONE
+        cameraContainer.visibility = View.VISIBLE
+        startCamera()
     }
 
     private fun startCamera() {
@@ -126,22 +175,28 @@ class MainActivity : AppCompatActivity() {
                 it.setSurfaceProvider(findViewById<PreviewView>(R.id.viewFinder).surfaceProvider)
             }
             imageCapture = ImageCapture.Builder().build()
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
+            } catch (exc: Exception) { }
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun takeSecurePhoto() {
-        imageCapture?.takePicture(ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageCapturedCallback() {
-            override fun onCaptureSuccess(image: ImageProxy) {
-                val buffer = image.planes[0].buffer
-                val bytes = ByteArray(buffer.remaining())
-                buffer.get(bytes)
-                image.close()
-                saveAndShowPreview(bytes)
+        val imageCapture = imageCapture ?: return
+        imageCapture.takePicture(
+            ContextCompat.getMainExecutor(this),
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    val buffer = image.planes[0].buffer
+                    val bytes = ByteArray(buffer.remaining())
+                    buffer.get(bytes)
+                    image.close()
+                    saveAndShowPreview(bytes)
+                }
+                override fun onError(exc: ImageCaptureException) { }
             }
-            override fun onError(exc: ImageCaptureException) {}
-        })
+        )
     }
 
     private fun saveAndShowPreview(data: ByteArray) {
@@ -151,6 +206,7 @@ class MainActivity : AppCompatActivity() {
             if (!folder.exists()) folder.mkdirs()
             val file = File(folder, "SEC_$timeStamp.sec")
             
+            // Encryption check
             val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
             val dataToSave = if (savedKey != null) encryptWithPublicKey(data, savedKey) else data
 
@@ -183,5 +239,9 @@ class MainActivity : AppCompatActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(Intent.createChooser(intent, "Send Secure .sec File"))
+    }
+
+    private fun allPermissionsGranted() = arrayOf(Manifest.permission.CAMERA).all {
+        ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
     }
 }
