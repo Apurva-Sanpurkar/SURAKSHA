@@ -44,37 +44,55 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusIndicator: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
-        setContentView(R.layout.activity_main)
+    super.onCreate(savedInstanceState)
+    window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+    setContentView(R.layout.activity_main)
 
-        dashboard = findViewById(R.id.dashboard_ui)
-        cameraContainer = findViewById(R.id.camera_container)
-        postCapturePreview = findViewById(R.id.post_capture_preview)
-        capturedImageView = findViewById(R.id.captured_image_view)
-        statusIndicator = findViewById(R.id.status_indicator)
+    dashboard = findViewById(R.id.dashboard_ui)
+    cameraContainer = findViewById(R.id.camera_container)
+    postCapturePreview = findViewById(R.id.post_capture_preview)
+    capturedImageView = findViewById(R.id.captured_image_view)
+    statusIndicator = findViewById(R.id.status_indicator)
 
-        ensureHardwareIdentity()
-        updateStatusUI()
+    ensureHardwareIdentity()
+    updateStatusUI()
 
-        findViewById<CardView>(R.id.card_camera).setOnClickListener {
-            if (allPermissionsGranted()) openCameraUI()
-            else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
-        }
-
-        findViewById<CardView>(R.id.card_vault).setOnClickListener {
-            startActivity(Intent(this, VaultActivity::class.java))
-        }
-
-        findViewById<CardView>(R.id.btn_invite_contact).setOnClickListener { shareInviteLink() }
-        findViewById<Button>(R.id.capture_button).setOnClickListener { takeSecurePhoto() }
-        findViewById<Button>(R.id.btn_share_now).setOnClickListener { shareEncryptedFile() }
-        findViewById<Button>(R.id.btn_discard).setOnClickListener {
-            postCapturePreview.visibility = View.GONE
-            cameraContainer.visibility = View.VISIBLE
-            startCamera()
-        }
+    // --- DASHBOARD NAVIGATION ---
+    findViewById<CardView>(R.id.card_camera).setOnClickListener {
+        if (allPermissionsGranted()) openCameraUI()
+        else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 10)
     }
+
+    findViewById<CardView>(R.id.card_vault).setOnClickListener {
+        startActivity(Intent(this, VaultActivity::class.java))
+    }
+
+    findViewById<CardView>(R.id.btn_invite_contact).setOnClickListener { shareInviteLink() }
+
+    // --- CAMERA ACTIONS ---
+    findViewById<Button>(R.id.capture_button).setOnClickListener { takeSecurePhoto() }
+    
+    // NEW: BACK BUTTON LOGIC
+    findViewById<ImageButton>(R.id.btn_back_to_dash).setOnClickListener {
+        cameraContainer.visibility = View.GONE
+        dashboard.visibility = View.VISIBLE
+        
+        // Safety: Unbind camera to save resources
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+            cameraProvider.unbindAll() 
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    // --- PREVIEW ACTIONS ---
+    findViewById<Button>(R.id.btn_share_now).setOnClickListener { shareEncryptedFile() }
+    findViewById<Button>(R.id.btn_discard).setOnClickListener {
+        postCapturePreview.visibility = View.GONE
+        cameraContainer.visibility = View.VISIBLE
+        startCamera()
+    }
+}
 
     private fun updateStatusUI() {
         val savedKey = getSharedPreferences("Contacts", MODE_PRIVATE).getString("saved_key", null)
