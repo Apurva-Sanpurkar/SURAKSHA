@@ -23,7 +23,8 @@ class VaultActivity : AppCompatActivity() {
     private var decryptedBitmap: Bitmap? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 1. MUST BE FIRST: Block Screenshots and Screen Recording
+        // 1. SECURITY: Block Screenshots and Screen Recording
+        // This must be called BEFORE super.onCreate and setContentView
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -32,23 +33,27 @@ class VaultActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_vault)
 
+        // Back button to return to Dashboard
         findViewById<ImageButton>(R.id.btn_vault_back).setOnClickListener {
             finish() 
         }
 
         findViewById<Button>(R.id.btn_select_file).setOnClickListener {
+            // Path must match the subfolder in MainActivity
             val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Suraksha")
             val files = folder.listFiles { f -> f.extension == "sec" } ?: arrayOf()
             
             if (files.isEmpty()) {
-                Toast.makeText(this, "No secure files found", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "No .sec files found in Downloads/Suraksha", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
             val names = files.map { it.name }.toTypedArray()
-            AlertDialog.Builder(this).setTitle("Open File").setItems(names) { _, i ->
-                decryptFile(files[i])
-            }.show()
+            AlertDialog.Builder(this)
+                .setTitle("Select Encrypted File")
+                .setItems(names) { _, i ->
+                    decryptFile(files[i])
+                }.show()
         }
 
         findViewById<Button>(R.id.btn_share_decrypted).setOnClickListener {
@@ -61,6 +66,7 @@ class VaultActivity : AppCompatActivity() {
             val bytes = file.readBytes()
             val bis = java.io.ByteArrayInputStream(bytes)
 
+            // 1. Read 4-byte header for key length
             val header = ByteArray(4)
             bis.read(header)
             val keyLength = ((header[0].toInt() and 0xFF) shl 24) or 
@@ -68,20 +74,24 @@ class VaultActivity : AppCompatActivity() {
                            ((header[2].toInt() and 0xFF) shl 8) or 
                            (header[3].toInt() and 0xFF)
 
+            // 2. Extract Keys and Photo
             val encryptedAesKey = ByteArray(keyLength)
             bis.read(encryptedAesKey)
             val encryptedPhoto = bis.readBytes()
 
+            // 3. Decrypt AES Key with RSA Private Key from KeyStore
             val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             val privateKey = ks.getKey("suraksha_id", null) as java.security.PrivateKey
             val rsaCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
             rsaCipher.init(Cipher.DECRYPT_MODE, privateKey)
             val aesKeyBytes = rsaCipher.doFinal(encryptedAesKey)
 
+            // 4. Decrypt Photo with AES
             val aesCipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
             aesCipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(aesKeyBytes, "AES"))
             val photoBytes = aesCipher.doFinal(encryptedPhoto)
 
+            // 5. Update UI
             decryptedBitmap = BitmapFactory.decodeByteArray(photoBytes, 0, photoBytes.size)
             findViewById<ImageView>(R.id.decryptedImageView).setImageBitmap(decryptedBitmap)
             
@@ -96,23 +106,24 @@ class VaultActivity : AppCompatActivity() {
     private fun shareDecryptedPhoto() {
         val bitmap = decryptedBitmap ?: return
         try {
-            // Create a dedicated 'shared' folder in the app's internal cache
+            // Create internal 'shared' cache folder
             val cachePath = File(cacheDir, "shared")
-            cachePath.mkdirs()
+            if (!cachePath.exists()) cachePath.mkdirs()
+            
             val file = File(cachePath, "decrypted_share.png")
             
-            // Save the bitmap to the cache so the FileProvider can find it
+            // Save bitmap to cache for FileProvider access
             FileOutputStream(file).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
 
-            // Create the Secure URI via FileProvider
+            // Secure URI creation
             val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
             
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "image/png"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) // Give the receiver app temporary access
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) 
             }
             startActivity(Intent.createChooser(intent, "Share Decrypted Photo"))
         } catch (e: Exception) {
