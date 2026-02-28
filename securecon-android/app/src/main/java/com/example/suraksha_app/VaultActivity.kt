@@ -6,6 +6,8 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.view.View
+import android.view.WindowManager
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -21,12 +23,17 @@ class VaultActivity : AppCompatActivity() {
     private var decryptedBitmap: Bitmap? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 1. MUST BE FIRST: Block Screenshots and Screen Recording
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
+        
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_vault)
 
-        // Fix: Manual back button handler if you have a UI button for it
-        findViewById<ImageButton>(R.id.btn_vault_back)?.setOnClickListener {
-            onBackPressedDispatcher.onBackPressed()
+        findViewById<ImageButton>(R.id.btn_vault_back).setOnClickListener {
+            finish() 
         }
 
         findViewById<Button>(R.id.btn_select_file).setOnClickListener {
@@ -34,7 +41,7 @@ class VaultActivity : AppCompatActivity() {
             val files = folder.listFiles { f -> f.extension == "sec" } ?: arrayOf()
             
             if (files.isEmpty()) {
-                Toast.makeText(this, "No files found", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "No secure files found", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
@@ -44,8 +51,7 @@ class VaultActivity : AppCompatActivity() {
             }.show()
         }
 
-        // New: Share Decrypted Photo button
-        findViewById<Button>(R.id.btn_share_decrypted)?.setOnClickListener {
+        findViewById<Button>(R.id.btn_share_decrypted).setOnClickListener {
             shareDecryptedPhoto()
         }
     }
@@ -79,8 +85,8 @@ class VaultActivity : AppCompatActivity() {
             decryptedBitmap = BitmapFactory.decodeByteArray(photoBytes, 0, photoBytes.size)
             findViewById<ImageView>(R.id.decryptedImageView).setImageBitmap(decryptedBitmap)
             
-            // Show share button once decrypted
-            findViewById<Button>(R.id.btn_share_decrypted)?.visibility = android.view.View.VISIBLE
+            // Show share button only after successful decryption
+            findViewById<Button>(R.id.btn_share_decrypted).visibility = View.VISIBLE
             
         } catch (e: Exception) {
             Toast.makeText(this, "Decryption Failed: ${e.message}", Toast.LENGTH_LONG).show()
@@ -90,24 +96,27 @@ class VaultActivity : AppCompatActivity() {
     private fun shareDecryptedPhoto() {
         val bitmap = decryptedBitmap ?: return
         try {
-            // Save decrypted bitmap to temporary file for sharing
-            val cachePath = File(cacheDir, "images")
+            // Create a dedicated 'shared' folder in the app's internal cache
+            val cachePath = File(cacheDir, "shared")
             cachePath.mkdirs()
-            val stream = FileOutputStream("$cachePath/shared_image.png")
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-            stream.close()
-
-            val imageFile = File(cachePath, "shared_image.png")
-            val contentUri = FileProvider.getUriForFile(this, "${packageName}.provider", imageFile)
-
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "image/png"
-                putExtra(Intent.EXTRA_STREAM, contentUri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val file = File(cachePath, "decrypted_share.png")
+            
+            // Save the bitmap to the cache so the FileProvider can find it
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
-            startActivity(Intent.createChooser(shareIntent, "Share Decrypted Image"))
+
+            // Create the Secure URI via FileProvider
+            val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
+            
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "image/png"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) // Give the receiver app temporary access
+            }
+            startActivity(Intent.createChooser(intent, "Share Decrypted Photo"))
         } catch (e: Exception) {
-            Toast.makeText(this, "Share Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Share Error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 }
